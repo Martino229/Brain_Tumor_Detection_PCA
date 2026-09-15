@@ -1,0 +1,13 @@
+__pycache__/
+venv/
+.idea/
+.vscode/
+
+# Non caricare il dataset
+train/
+test/
+*.png
+*.jpg
+
+# Non caricare gli output locali
+*.xlsx
