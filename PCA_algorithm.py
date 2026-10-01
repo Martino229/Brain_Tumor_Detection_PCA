@@ -10,7 +10,7 @@ class PCA_SVD:
         self.cumulative_variance = None
 
     def fit(self, X):
-        # Sicurezza: conversione in float64 per evitare underflow matematico
+        # Sicurezza: conversione in float64 per evitare underflow
         X = np.asarray(X, dtype=np.float64)
         n_samples = X.shape[0]
 
@@ -45,9 +45,8 @@ class PCA_SVD:
     # --- NUOVE FUNZIONI AGGIUNTE ---
 
     def inverse_transform(self, scores, k_components):
-        """
-        Ricostruisce l'immagine dallo spazio compresso a quello originale.
-        """
+
+        #Ricostruisce l'immagine dallo spazio compresso a quello originale.
         # Seleziona le prime k componenti (Autocervelli)
         Vk = self.components[:k_components, :]
 
