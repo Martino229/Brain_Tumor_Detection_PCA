@@ -46,67 +46,64 @@ def main():
         print("\n[ERRORE] Nessuna immagine caricata.")
         return
 
-    print(f"\n--- 3. CROSS-VALIDATION A {n_splits} FOLD ---")
+    print("\n--- 3. ADDESTRAMENTO PCA SULL'INTERO TRAINING SET (300 Immagini) ---")
+    # La PCA ora vede tutte le 300 immagini insieme, calcolando K in modo globale
+    pca = PCA_SVD()
+    pca.fit(X_train_val)
+    k_opt = pca.get_k_for_variance(pca_variance_target)
+
+    # Trasformazione definitiva di tutti i dati nello spazio ridotto a K componenti
+    X_train_val_pca = pca.transform(X_train_val, k_opt)
+    X_test_final_pca = pca.transform(X_test_final, k_opt)
+
+    print(f"Componenti estratte per raggiungere il {pca_variance_target}% di varianza: {k_opt}")
+
+    print(f"\n--- 4. CROSS-VALIDATION A {n_splits} FOLD (Sul K-NN) ---")
     np.random.seed(42)
     fold_indices = stratified_k_fold(y_train_val, k=n_splits)
 
-    cv_metrics = {"Accuracy": [], "Recall": [], "Precision": [], "Specificity": [], "F1_score": [], "K_PCA": []}
+    cv_metrics = {"Accuracy": [], "Recall": [], "Precision": [], "Specificity": [], "F1_score": []}
 
     for fold, (train_idx, test_idx) in enumerate(fold_indices):
-        X_train, X_test = X_train_val[train_idx], X_train_val[test_idx]
-        y_train, y_test = y_train_val[train_idx], y_train_val[test_idx]
-
-        # PCA Dinamica
-        pca = PCA_SVD()
-        pca.fit(X_train)
-        k_opt = pca.get_k_for_variance(pca_variance_target)
-        X_train_pca = pca.transform(X_train, k_opt)
-        X_test_pca = pca.transform(X_test, k_opt)
+        # La divisione in fold ora avviene SULLE COMPONENTI (X_train_val_pca), non più sui pixel grezzi
+        X_train_fold, X_test_fold = X_train_val_pca[train_idx], X_train_val_pca[test_idx]
+        y_train_fold, y_test_fold = y_train_val[train_idx], y_train_val[test_idx]
 
         # Classificazione KNN
         knn = KNN(n=3)
-        knn.fit(X_train_pca, y_train)
-        y_pred, _, _ = knn.predict(X_test_pca)
+        knn.fit(X_train_fold, y_train_fold)
+        y_pred, _, _ = knn.predict(X_test_fold)
 
-        metrics = results(y_test, y_pred)
+        metrics = results(y_test_fold, y_pred)
         if metrics:
             for key in ["Accuracy", "Recall", "Precision", "Specificity", "F1_score"]:
                 cv_metrics[key].append(metrics[key])
-            cv_metrics["K_PCA"].append(k_opt)
-            print(f"Fold {fold + 1} -> Acc: {metrics['Accuracy'] * 100:.1f}% | K Componenti usate: {k_opt}")
+            print(f"Fold {fold + 1} -> Acc: {metrics['Accuracy'] * 100:.1f}%")
 
-    print("\n--- 4. TEST FINALE SULLA CARTELLA TEST BLINDATA ---")
-    pca_final = PCA_SVD()
-    pca_final.fit(X_train_val)
-    k_final = pca_final.get_k_for_variance(pca_variance_target)
-
-    X_train_val_scores = pca_final.transform(X_train_val, k_final)
-    X_test_final_scores = pca_final.transform(X_test_final, k_final)
-
-    # Calcolo soglia anomalia sul Train
-    distanze_train = np.sqrt(np.sum((X_train_val_scores - np.mean(X_train_val_scores, axis=0)) ** 2, axis=1))
+    print("\n--- 5. TEST FINALE SULLA CARTELLA TEST BLINDATA ---")
+    # Calcolo soglia anomalia sul Train già compresso dalla PCA globale
+    distanze_train = np.sqrt(np.sum((X_train_val_pca - np.mean(X_train_val_pca, axis=0)) ** 2, axis=1))
     soglia_anomalia = np.max(distanze_train) * 1.5
 
     knn_final = KNN(unknown_threshold=soglia_anomalia)
-    best_n = knn_final.optimize_n(X_train_val_scores, y_train_val)
+    best_n = knn_final.optimize_n(X_train_val_pca, y_train_val)
 
-    y_pred_final, distances_final, confidences_final = knn_final.predict(X_test_final_scores)
+    y_pred_final, distances_final, confidences_final = knn_final.predict(X_test_final_pca)
 
     print("\n--- RISULTATI DIAGNOSTICI FINALI ---")
     report(y_test_final, y_pred_final)
     final_metrics = results(y_test_final, y_pred_final)
 
-    print("\n--- 5. GENERAZIONE CRUSCOTTO GRAFICO ---")
-    # Plotting standard 2D
-    plotter.plot_mean_image(pca_final.mean_vector, img_shape=img_size, save_name="grafico_mean_image.png")
-    plotter.eigenimages(pca_final.components, img_shape=img_size, n_images=4, save_name="grafico_eigenimages.png")
-    plotter.plot_variance(pca_final.cumulative_variance, save_name="grafico_varianza.png")
-    plotter.plot_pca(X_train_val_scores, y_train_val, save_name="grafico_pca.png")
+    print("\n--- 6. GENERAZIONE CRUSCOTTO GRAFICO ---")
+    plotter.plot_mean_image(pca.mean_vector, img_shape=img_size, save_name="grafico_mean_image.png")
+    plotter.eigenimages(pca.components, img_shape=img_size, n_images=4, save_name="grafico_eigenimages.png")
+    plotter.plot_variance(pca.cumulative_variance, save_name="grafico_varianza.png")
+    plotter.plot_pca(X_train_val_pca, y_train_val, save_name="grafico_pca.png")
     plotter.plot_distance_distribution(distances_final, threshold=soglia_anomalia,
                                        save_name="grafico_distribuzione_distanze.png")
     plotter.plot_confusion_matrix(y_test_final, y_pred_final, save_name="grafico_matrice_confusione.png")
 
-    print("\n--- 6. ESPORTAZIONE REPORT EXCEL ---")
+    print("\n--- 7. ESPORTAZIONE REPORT EXCEL ---")
     if final_metrics is not None:
         tot_train = len(X_train_val)
         tot_test = len(X_test_final)
@@ -137,11 +134,11 @@ def main():
             {"Analisi": "Campioni Test Validi Analizzati", "CV (Media)": "-", "CV (Dev. Std)": "-",
              "Test Blindato": validi},
 
-            # --- DETTAGLI PCA ---
-            {"Analisi": "Componenti PCA Utilizzate (K)", "CV (Media)": int(np.mean(cv_metrics['K_PCA'])),
-             "CV (Dev. Std)": "-", "Test Blindato": k_final},
+            # --- DETTAGLI PCA (Ora il valore è unico e globale) ---
+            {"Analisi": "Componenti PCA Utilizzate (K)", "CV (Media)": k_opt, "CV (Dev. Std)": "-",
+             "Test Blindato": k_opt},
             {"Analisi": "Varianza Spiegata PCA", "CV (Media)": "-", "CV (Dev. Std)": "-",
-             "Test Blindato": pca_final.cumulative_variance[k_final - 1] / 100.0},
+             "Test Blindato": pca.cumulative_variance[k_opt - 1] / 100.0},
 
             # --- METRICHE CLINICHE ---
             {"Analisi": "Accuratezza", "CV (Media)": np.mean(cv_metrics['Accuracy']),
@@ -163,9 +160,11 @@ def main():
              "Test Blindato": fn_perc}
         ]
 
+        numero_reale_componenti = X_train_val_pca.shape[1]
+        print(f"Componenti effettivamente utilizzate dopo il taglio: {numero_reale_componenti}")
+
         immagini_excel = ["grafico_varianza.png", "grafico_pca.png", "grafico_distribuzione_distanze.png",
                           "grafico_matrice_confusione.png"]
-
         excel_export(export_data, output_filename="Report_Tumori_Cerebrali.xlsx", image_paths=immagini_excel)
 
 
